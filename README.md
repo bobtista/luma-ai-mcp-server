@@ -297,6 +297,59 @@ Make sure to replace `/path/to/your/luma-ai-mcp-server` with the actual path to 
 },
 ```
 
+## Assistant Configuration
+
+### Claude Desktop
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
+```json
+{
+  "mcpServers": {
+    "luma": {
+      "command": ["python", "-m", "luma_ai_mcp_server"],
+      "cwd": "/path/to/venv/directory"
+    }
+  }
+}
+```
+
+### Windsurf
+The server will be automatically configured if installed in your environment.
+
+## API Key Setup
+
+Two ways to provide your Luma API key:
+
+1. Environment Variable (recommended):
+   ```bash
+   # In .env file
+   LUMA_API_KEY=your_key_here
+   ```
+   
+2. Command Line:
+   ```bash
+   python -m luma_ai_mcp_server --api-key your_key_here
+   ```
+
+## Troubleshooting
+
+Common issues and solutions:
+
+1. **API Key Issues**
+   - Ensure your API key is correctly set
+   - Run diagnostic mode to verify connectivity
+   - Check for proper environment variable setup
+
+2. **Connection Problems**
+   - Verify internet connectivity
+   - Check Luma API status
+   - Run with `--verbose` for detailed logs
+
+## Security Notes
+
+- API keys should be stored securely in environment variables
+- Never commit API keys to version control
+- Server validates API keys before making requests
+
 ## Advanced Video Generation Types 🎬
 
 The Luma API supports various types of advanced video generation through keyframes:

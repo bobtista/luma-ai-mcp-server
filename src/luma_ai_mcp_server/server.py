@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+LUMA_API_BASE = "https://api.lumalabs.ai/dream-machine/v1"
 
 
 class Resolution(str, Enum):
@@ -122,74 +124,53 @@ class GetCameraMotionsInput(BaseModel):
     pass
 
 
-async def _make_luma_request(method: str, endpoint: str, api_key: str = None, **kwargs) -> Any:
-    """Make a request to the Luma API."""
-    api_key = api_key or os.getenv("LUMA_API_KEY")
-    if not api_key:
-        raise ValueError("LUMA_API_KEY environment variable or --api-key option is required")
+def _validate_api_key(api_key: Optional[str] = None) -> str:
+    """Validate and return API key."""
+    key = api_key or os.environ.get("LUMA_API_KEY")
+    if not key:
+        raise ValueError(
+            "No API key provided. Set LUMA_API_KEY environment variable or pass --api-key"
+        )
+    if not isinstance(key, str) or len(key) < 32:
+        raise ValueError("Invalid API key format")
+    return key
 
-    base_url = "https://api.lumalabs.ai/dream-machine/v1"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
 
-    client = None
-    try:
-        client = httpx.AsyncClient(timeout=30.0)
-        response = await client.request(method, f"{base_url}/{endpoint}", headers=headers, **kwargs)
-        status_code = response.status_code
-
-        if not response.content:
-            return {}
-
-        json_data = {}
+async def _make_luma_request(
+    method: str, endpoint: str, api_key: Optional[str] = None, **kwargs
+) -> Dict[str, Any]:
+    """Make a request to the Luma API with proper error handling."""
+    key = _validate_api_key(api_key)
+    url = f"{LUMA_API_BASE}/{endpoint.lstrip('/')}"
+    
+    async with httpx.AsyncClient() as client:
         try:
-            content_type = response.headers.get("content-type", "")
-            if "application/json" in content_type:
-                json_data = response.json()
-            else:
-                text_content = response.text
-                if text_content and (text_content.startswith("{") or text_content.startswith("[")):
-                    json_data = response.json()
-                else:
-                    json_data = {"raw_response": text_content}
-        except Exception as json_error:
-            logging.warning(f"Failed to parse JSON response: {json_error}")
-            json_data = {"raw_response": response.text}
-
-        if status_code >= 400:
-            error_msg = f"HTTP error {status_code}"
-            if json_data:
-                error_msg += f": {json_data}"
-            raise ValueError(error_msg)
-
-        return json_data
-    except httpx.RequestError as e:
-        logging.error(f"Request error: {e}", exc_info=True)
-        raise ValueError(f"Network error: {str(e)}") from e
-    except Exception as e:
-        logging.error(f"Unexpected error in _make_luma_request: {e}", exc_info=True)
-        raise
-    finally:
-        if client:
-            try:
-                await client.aclose()
-            except Exception as e:
-                logging.warning(f"Error closing httpx client: {e}")
+            response = await client.request(
+                method,
+                url,
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30.0,
+                **kwargs
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValueError("Invalid API key") from e
+            elif e.response.status_code == 429:
+                raise ValueError("Rate limit exceeded") from e
+            raise ValueError(f"API request failed: {e.response.text}") from e
+        except httpx.TimeoutException:
+            raise ValueError("API request timed out")
+        except Exception as e:
+            raise ValueError(f"Request failed: {str(e)}") from e
 
 
 async def ping(parameters: dict, api_key: Optional[str] = None) -> str:
     """Check if the Luma API is running."""
     try:
-        result = await _make_luma_request("GET", "ping", api_key=api_key)
-
-        result_details = ""
-        if result:
-            result_details = f": {result}"
-
-        return f"Luma API is available and responding{result_details}"
+        await _make_luma_request("GET", "ping", api_key=api_key)
+        return "Luma API is available and responding"
     except Exception as e:
         logging.error(f"Error in ping: {str(e)}", exc_info=True)
         return f"Error pinging Luma API: {str(e)}"
@@ -279,8 +260,8 @@ async def create_generation(parameters: dict, api_key: Optional[str] = None) -> 
 
         generation_id = result.get("id", "Unknown")
         state = result.get("state", "Processing")
-        generation_type = result.get("generation_type", "video")
         created_at = result.get("created_at", "Unknown")
+        generation_type = result.get("generation_type", "video")
         model = result.get("model", parameters.get("model", "ray-2"))
 
         assets = result.get("assets", {})
