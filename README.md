@@ -1,10 +1,10 @@
 # Luma AI MCP Server 🎥
 
-A Model Context Protocol server for Luma AI's video generation capabilities.
+A Model Context Protocol server for Luma AI's Dream Machine API.
 
 ## Overview
 
-This MCP server integrates with Luma AI's API to provide tools for generating, managing, and manipulating AI-generated videos and images via Large Language Models. It implements the Model Context Protocol (MCP) to enable seamless interaction between AI assistants and Luma's creative tools.
+This MCP server integrates with Luma AI's Dream Machine API (v1) to provide tools for generating, managing, and manipulating AI-generated videos and images via Large Language Models. It implements the Model Context Protocol (MCP) to enable seamless interaction between AI assistants and Luma's creative tools.
 
 ## Features ✨
 
@@ -12,7 +12,7 @@ This MCP server integrates with Luma AI's API to provide tools for generating, m
 - Advanced video generation with keyframes
 - Image-to-video conversion
 - Video extension and interpolation
-- Image generation
+- Image generation with reference images
 - Audio addition to videos
 - Video upscaling
 - Credit management
@@ -31,9 +31,10 @@ This MCP server integrates with Luma AI's API to provide tools for generating, m
    - Input:
      - `prompt` (string, required): Text description of the video to generate
      - `model` (string, optional): Model to use (default: "ray-2")
+       - Available models: "ray-1-6", "ray-2", "ray-flash-2"
      - `resolution` (string, optional): Video resolution (choices: "540p", "720p", "1080p", "4k")
-     - `duration` (string, optional): Video duration (only "5s" and "9s" are currently supported by the API)
-     - `aspect_ratio` (string, optional): Video aspect ratio (e.g., "16:9")
+     - `duration` (string, optional): Video duration (only "5s" and "9s" are currently supported)
+     - `aspect_ratio` (string, optional): Video aspect ratio (e.g., "16:9", "1:1", "9:16", "4:3", "3:4", "21:9", "9:21")
      - `loop` (boolean, optional): Whether to make the video loop
      - `keyframes` (object, optional): Start and end frames for advanced video generation:
        - `frame0` and/or `frame1` with either:
@@ -45,6 +46,11 @@ This MCP server integrates with Luma AI's API to provide tools for generating, m
    - Gets the status of a generation
    - Input:
      - `generation_id` (string, required): ID of the generation to check
+   - Output includes:
+     - Generation ID
+     - State (queued, dreaming, completed, failed)
+     - Failure reason (if failed)
+     - Video URL (if completed)
 
 4. `list_generations`
 
@@ -78,21 +84,29 @@ This MCP server integrates with Luma AI's API to provide tools for generating, m
      - `prompt` (required): The prompt for the audio generation
      - `negative_prompt` (optional): The negative prompt for the audio generation
      - `callback_url` (optional): URL to notify when the audio processing is complete
-   - Output:
-     Information about the generation with audio being added
 
 8. `generate_image`
 
-   - Generates an image from a text prompt
+   - Generates an image from a text prompt with optional reference images
    - Input:
      - `prompt` (string, required): Text description of the image to generate
      - `model` (string, optional): Model to use for image generation (default: "photon-1")
-       - Note: Only "photon-1" and "photon-flash-1" are supported for image generation
+       - Available models: "photon-1", "photon-flash-1"
+     - `aspect_ratio` (string, optional): Image aspect ratio (same options as video)
+     - `image_ref` (array, optional): Reference images to guide generation
+       - Each ref: `{"url": "image_url", "weight": optional_float}`
+     - `style_ref` (array, optional): Style reference images
+       - Each ref: `{"url": "image_url", "weight": optional_float}`
+     - `character_ref` (object, optional): Character reference images
+       - Format: `{"identity_name": {"images": ["url1", "url2", ...]}}`
+     - `modify_image_ref` (object, optional): Image to modify
+       - Format: `{"url": "image_url", "weight": optional_float}`
 
 9. `get_credits`
 
    - Gets credit information for the current user
    - No parameters required
+   - Returns available credit balance in USD cents
 
 10. `get_camera_motions`
     - Gets all supported camera motions
@@ -157,17 +171,25 @@ The Luma API supports various types of advanced video generation through keyfram
 
 ## API Limitations and Notes 📝
 
-- **Duration**: Currently, the Luma API only supports durations of "5s" or "9s"
+- **Duration**: Currently, the API only supports durations of "5s" or "9s"
 - **Resolution**: Valid values are "540p", "720p", "1080p", and "4k"
 - **Models**:
-  - Video generation: "ray-2" (default)
-  - Image generation: "photon-1" (default) or "photon-flash-1"
+  - Video generation:
+    - "ray-2" (default) - Best quality, slower
+    - "ray-flash-2" - Faster generation
+    - "ray-1-6" - Legacy model
+  - Image generation:
+    - "photon-1" (default) - Best quality, slower
+    - "photon-flash-1" - Faster generation
 - **Generation types**: Video, image, and advanced (with keyframes)
+- **Aspect Ratios**: "1:1" (square), "16:9" (landscape), "9:16" (portrait), "4:3" (standard), "3:4" (standard portrait), "21:9" (ultrawide), "9:21" (ultrawide portrait)
+- **States**: "queued", "dreaming", "completed", "failed"
 - **Upscaling**:
   - Video generations can only be upscaled when they're in a "complete" state
   - Target resolution must be higher than the original generation's resolution
   - Each generation can only be upscaled once
-- **API Key**: Required in environment variables or passed as an argument
+- **API Key**: Required in environment variables
+- **API Version**: Uses Dream Machine API v1
 
 ## License 📄
 
