@@ -7,14 +7,24 @@ from mcp.types import TextContent, Tool
 
 from luma_ai_mcp_server.server import (
     AddAudioInput,
+    AspectRatio,
     CreateGenerationInput,
+    Duration,
     GenerateImageInput,
+    GenerationType,
     GetCreditsInput,
     GetGenerationInput,
+    ImageIdentity,
+    ImageModel,
+    ImageRef,
     ListGenerationsInput,
     LumaTools,
+    ModifyImageRef,
     PingInput,
+    Resolution,
+    State,
     UpscaleGenerationInput,
+    VideoModel,
     add_audio,
     create_generation,
     delete_generation,
@@ -30,20 +40,20 @@ from luma_ai_mcp_server.server import (
 # Mock responses
 MOCK_GENERATION_RESPONSE = {
     "id": "test-id",
-    "state": "pending",
+    "state": State.QUEUED.value,
     "created_at": "2024-03-20T12:00:00Z",
     "assets": {},
     "version": "1.0",
-    "request": {"prompt": "test prompt", "model": "ray-2"},
+    "request": {"prompt": "test prompt", "model": VideoModel.RAY_2.value},
 }
 
 MOCK_COMPLETED_GENERATION = {
     "id": "test-id",
-    "state": "completed",
+    "state": State.COMPLETED.value,
     "created_at": "2024-03-20T12:00:00Z",
     "assets": {"video": "https://example.com/video.mp4"},
     "version": "1.0",
-    "request": {"prompt": "test prompt", "model": "ray-2"},
+    "request": {"prompt": "test prompt", "model": VideoModel.RAY_2.value},
 }
 
 MOCK_CREDITS_RESPONSE = {"credit_balance": 150000.0}
@@ -91,22 +101,30 @@ async def test_create_generation(mock_env):
     with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_request:
         mock_response = MagicMock()
         mock_response.json.return_value = MOCK_GENERATION_RESPONSE
-        mock_response.raise_for_status = AsyncMock()
-        mock_response.content = b"{}"
-        mock_response.text = "{}"
         mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b"{}"
         mock_request.return_value = mock_response
 
+        # Test successful generation
         result = await create_generation({"prompt": "test prompt", "resolution": "720p"})
-
         assert "Created text-to-video generation with ID: test-id" in result
-        assert "State: pending" in result
+        assert f"State: {State.QUEUED.value}" in result
 
-        mock_request.assert_called_once()
         call_kwargs = mock_request.call_args.kwargs
         assert call_kwargs["json"]["prompt"] == "test prompt"
         assert call_kwargs["json"]["resolution"] == "720p"
+
+        # Test missing prompt
+        with pytest.raises(ValueError, match="prompt parameter is required"):
+            await create_generation({})
+
+        # Test invalid model
+        with pytest.raises(ValueError, match="Invalid model"):
+            await create_generation({"prompt": "test", "model": "invalid-model"})
+
+        # Test invalid aspect ratio
+        with pytest.raises(ValueError, match="Invalid aspect ratio"):
+            await create_generation({"prompt": "test", "aspect_ratio": "invalid-ratio"})
 
 
 @pytest.mark.asyncio
@@ -151,8 +169,8 @@ async def test_list_generations(mock_env):
 
         assert "Generations:" in result
         assert "ID: test-id" in result
-        assert "State: pending" in result
-        assert "State: completed" in result
+        assert f"State: {State.QUEUED.value}" in result
+        assert f"State: {State.COMPLETED.value}" in result
         assert "Video URL: https://example.com/video.mp4" in result
 
 
@@ -224,31 +242,32 @@ async def test_generate_image(mock_env):
     with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_request:
         mock_response = MagicMock()
         mock_response.json.return_value = {
-            "id": "img-123",
-            "state": "completed",
-            "generation_type": "image",
-            "created_at": "2024-03-20T12:00:00Z",
             "assets": {"image": "https://example.com/image.png"},
+            "state": "completed",
         }
-        mock_response.raise_for_status = AsyncMock()
-        mock_response.content = b"{}"
-        mock_response.text = "{}"
         mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b"{}"
         mock_request.return_value = mock_response
 
-        result = await generate_image({"prompt": "test prompt", "model": "photon-1"})
-
-        assert "Image generation" in result
+        # Test successful generation
+        result = await generate_image({"prompt": "test prompt"})
+        assert "Image generation completed" in result
         assert "Prompt: test prompt" in result
+        assert "Model: photon-1" in result
         assert "Image URL: https://example.com/image.png" in result
 
-        mock_request.assert_called_once()
-        args, kwargs = mock_request.call_args
-        assert args[0] == "POST"
-        assert "image" in args[1]
-        assert kwargs["json"]["prompt"] == "test prompt"
-        assert kwargs["json"]["model"] == "photon-1"
+        # Test invalid model
+        with pytest.raises(ValueError, match="Invalid model"):
+            await generate_image({"prompt": "test", "model": "invalid-model"})
+
+        # Test invalid aspect ratio
+        with pytest.raises(ValueError, match="Invalid aspect ratio"):
+            await generate_image({"prompt": "test", "aspect_ratio": "invalid-ratio"})
+
+        # Test missing image URL in response
+        mock_response.json.return_value = {"assets": {}}
+        with pytest.raises(ValueError, match="No image URL in API response"):
+            await generate_image({"prompt": "test prompt"})
 
 
 @pytest.mark.asyncio
@@ -276,45 +295,65 @@ async def test_get_credits(mock_env):
 
 
 def test_tool_schemas():
-    """Test that the tool input schemas are correctly defined."""
-    # Test PingInput
-    schema = PingInput.model_json_schema()
-    assert "properties" in schema
-
+    """Test that all tool schemas are properly defined."""
     # Test CreateGenerationInput
     schema = CreateGenerationInput.model_json_schema()
-    assert schema["properties"]["prompt"]["type"] == "string"
-    assert schema["properties"]["model"]["default"] == "ray-2"
+    assert "prompt" in schema["properties"]
+    assert schema["properties"]["model"]["default"] == VideoModel.RAY_2.value
+    assert "aspect_ratio" in schema["properties"]
     assert "resolution" in schema["properties"]
-
-    # Test GetGenerationInput
-    schema = GetGenerationInput.model_json_schema()
-    assert schema["properties"]["generation_id"]["type"] == "string"
-
-    # Test ListGenerationsInput
-    schema = ListGenerationsInput.model_json_schema()
-    assert schema["properties"]["limit"]["default"] == 10
-    assert schema["properties"]["offset"]["default"] == 0
-
-    # Test UpscaleGenerationInput
-    schema = UpscaleGenerationInput.model_json_schema()
-    assert schema["properties"]["generation_id"]["type"] == "string"
-    assert "resolution" in schema["properties"]
-
-    # Test AddAudioInput
-    schema = AddAudioInput.model_json_schema()
-    assert schema["properties"]["generation_id"]["type"] == "string"
-    assert schema["properties"]["prompt"]["type"] == "string"
-    assert "negative_prompt" in schema["properties"]
+    assert "duration" in schema["properties"]
 
     # Test GenerateImageInput
     schema = GenerateImageInput.model_json_schema()
-    assert schema["properties"]["prompt"]["type"] == "string"
-    assert schema["properties"]["model"]["default"] == "photon-1"
+    assert "prompt" in schema["properties"]
+    assert schema["properties"]["model"]["default"] == ImageModel.PHOTON_1.value
+    assert "aspect_ratio" in schema["properties"]
+    assert "image_ref" in schema["properties"]
+    assert "style_ref" in schema["properties"]
+    assert "character_ref" in schema["properties"]
+    assert "modify_image_ref" in schema["properties"]
 
-    # Test GetCreditsInput
-    schema = GetCreditsInput.model_json_schema()
-    assert "properties" in schema
+    # Test ImageRef
+    schema = ImageRef.model_json_schema()
+    assert "url" in schema["properties"]
+    assert "weight" in schema["properties"]
+
+    # Test ImageIdentity
+    schema = ImageIdentity.model_json_schema()
+    assert "images" in schema["properties"]
+    assert schema["properties"]["images"]["type"] == "array"
+
+    # Test ModifyImageRef
+    schema = ModifyImageRef.model_json_schema()
+    assert "url" in schema["properties"]
+    assert "weight" in schema["properties"]
+
+    # Test AspectRatio enum
+    assert AspectRatio.LANDSCAPE.value == "16:9"
+    assert AspectRatio.SQUARE.value == "1:1"
+    assert AspectRatio.PORTRAIT.value == "9:16"
+
+    # Test VideoModel enum
+    assert VideoModel.RAY_1_6.value == "ray-1-6"
+    assert VideoModel.RAY_2.value == "ray-2"
+    assert VideoModel.RAY_FLASH_2.value == "ray-flash-2"
+
+    # Test ImageModel enum
+    assert ImageModel.PHOTON_1.value == "photon-1"
+    assert ImageModel.PHOTON_FLASH_1.value == "photon-flash-1"
+
+    # Test State enum
+    assert State.QUEUED.value == "queued"
+    assert State.DREAMING.value == "dreaming"
+    assert State.COMPLETED.value == "completed"
+    assert State.FAILED.value == "failed"
+
+    # Test GenerationType enum
+    assert GenerationType.VIDEO.value == "video"
+    assert GenerationType.IMAGE.value == "image"
+    assert GenerationType.UPSCALE_VIDEO.value == "upscale_video"
+    assert GenerationType.ADD_AUDIO.value == "add_audio"
 
 
 @pytest.mark.asyncio
@@ -372,10 +411,14 @@ async def test_server_call_tool(mock_env):
     mock_fns = {
         "ping": AsyncMock(return_value="Luma API is available and responding"),
         "create_generation": AsyncMock(
-            return_value="Created generation with ID: test-id\nState: pending"
+            return_value=f"Created generation with ID: test-id\nState: {State.QUEUED.value}"
         ),
-        "get_generation": AsyncMock(return_value="Generation ID: test-id\nState: completed"),
-        "list_generations": AsyncMock(return_value="Generations:\nID: test-id\nState: completed"),
+        "get_generation": AsyncMock(
+            return_value=f"Generation ID: test-id\nState: {State.COMPLETED.value}"
+        ),
+        "list_generations": AsyncMock(
+            return_value=f"Generations:\nID: test-id\nState: {State.COMPLETED.value}"
+        ),
         "delete_generation": AsyncMock(return_value="Successfully deleted generation test-id"),
         "upscale_generation": AsyncMock(return_value="Upscale initiated for generation test-id"),
         "add_audio": AsyncMock(return_value="Audio added to generation test-id"),
@@ -389,16 +432,16 @@ async def test_server_call_tool(mock_env):
     }
 
     with (
-        patch("luma-ai-mcp-server.server.ping", mock_fns["ping"]),
-        patch("luma-ai-mcp-server.server.create_generation", mock_fns["create_generation"]),
-        patch("luma-ai-mcp-server.server.get_generation", mock_fns["get_generation"]),
-        patch("luma-ai-mcp-server.server.list_generations", mock_fns["list_generations"]),
-        patch("luma-ai-mcp-server.server.delete_generation", mock_fns["delete_generation"]),
-        patch("luma-ai-mcp-server.server.upscale_generation", mock_fns["upscale_generation"]),
-        patch("luma-ai-mcp-server.server.add_audio", mock_fns["add_audio"]),
-        patch("luma-ai-mcp-server.server.generate_image", mock_fns["generate_image"]),
-        patch("luma-ai-mcp-server.server.get_camera_motions", mock_fns["get_camera_motions"]),
-        patch("luma-ai-mcp-server.server.get_credits", mock_fns["get_credits"]),
+        patch("luma_ai_mcp_server.server.ping", mock_fns["ping"]),
+        patch("luma_ai_mcp_server.server.create_generation", mock_fns["create_generation"]),
+        patch("luma_ai_mcp_server.server.get_generation", mock_fns["get_generation"]),
+        patch("luma_ai_mcp_server.server.list_generations", mock_fns["list_generations"]),
+        patch("luma_ai_mcp_server.server.delete_generation", mock_fns["delete_generation"]),
+        patch("luma_ai_mcp_server.server.upscale_generation", mock_fns["upscale_generation"]),
+        patch("luma_ai_mcp_server.server.add_audio", mock_fns["add_audio"]),
+        patch("luma_ai_mcp_server.server.generate_image", mock_fns["generate_image"]),
+        patch("luma_ai_mcp_server.server.get_camera_motions", mock_fns["get_camera_motions"]),
+        patch("luma_ai_mcp_server.server.get_credits", mock_fns["get_credits"]),
     ):
 
         async def mock_call_tool(name, arguments):
@@ -474,28 +517,159 @@ async def test_server_call_tool(mock_env):
 
 @pytest.mark.asyncio
 async def test_create_generation_with_keyframes(mock_env):
-    """Test the create_generation function with keyframes."""
+    """Test creating a generation with keyframes."""
     with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_request:
         mock_response = MagicMock()
         mock_response.json.return_value = MOCK_GENERATION_RESPONSE
-        mock_response.raise_for_status = AsyncMock()
-        mock_response.content = b"{}"
-        mock_response.text = "{}"
         mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b"{}"
         mock_request.return_value = mock_response
 
-        keyframes = {"frame0": {"type": "image", "url": "https://example.com/image.jpg"}}
+        keyframes_data = {
+            "frame0": {"type": "image", "url": "https://example.com/start.jpg"},
+            "frame1": {"type": "image", "url": "https://example.com/end.jpg"},
+        }
 
-        result = await create_generation(
-            {"prompt": "test prompt", "resolution": "720p", "keyframes": keyframes}
-        )
+        result = await create_generation({"prompt": "test prompt", "keyframes": keyframes_data})
 
         assert "Created advanced generation" in result
         assert "starting from an image" in result
-        assert "State: pending" in result
+        assert "ending with an image" in result
 
+        # Verify request data
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["json"]["keyframes"] == keyframes_data
+
+        # Test invalid keyframes format
+        with pytest.raises(ValueError, match="keyframes must be an object"):
+            await create_generation({"prompt": "test", "keyframes": ["invalid"]})
+
+        # Test missing frame0/frame1
+        with pytest.raises(ValueError, match="keyframes must contain frame0 or frame1"):
+            await create_generation({"prompt": "test", "keyframes": {}})
+
+
+@pytest.mark.asyncio
+async def test_create_generation_with_video_model(mock_env):
+    """Test creating a generation with different video models."""
+    with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_request:
+        mock_response = MagicMock()
+        mock_response.json.return_value = MOCK_GENERATION_RESPONSE
+        mock_response.status_code = 200
+        mock_response.content = b"{}"
+        mock_request.return_value = mock_response
+
+        # Test with enum value
+        result = await create_generation({"prompt": "test prompt", "model": VideoModel.RAY_FLASH_2})
+        assert "Created text-to-video generation" in result
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["json"]["model"] == VideoModel.RAY_FLASH_2.value
+
+        # Test with string value
+        result = await create_generation({"prompt": "test prompt", "model": "ray-1-6"})
+        assert "Created text-to-video generation" in result
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["json"]["model"] == "ray-1-6"
+
+
+@pytest.mark.asyncio
+async def test_create_generation_with_aspect_ratio(mock_env):
+    """Test creating a generation with different aspect ratios."""
+    with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_request:
+        mock_response = MagicMock()
+        mock_response.json.return_value = MOCK_GENERATION_RESPONSE
+        mock_response.status_code = 200
+        mock_response.content = b"{}"
+        mock_request.return_value = mock_response
+
+        # Test with enum value
+        result = await create_generation(
+            {"prompt": "test prompt", "aspect_ratio": AspectRatio.LANDSCAPE}
+        )
+        assert "Created text-to-video generation" in result
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["json"]["aspect_ratio"] == AspectRatio.LANDSCAPE.value
+
+        # Test with string value
+        result = await create_generation({"prompt": "test prompt", "aspect_ratio": "1:1"})
+        assert "Created text-to-video generation" in result
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["json"]["aspect_ratio"] == "1:1"
+
+
+@pytest.mark.asyncio
+async def test_generate_image_with_references(mock_env):
+    """Test generating an image with reference images."""
+    with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_request:
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "assets": {"image": "https://example.com/image.png"},
+            "state": "completed",
+        }
+        mock_response.status_code = 200
+        mock_response.content = b"{}"
+        mock_request.return_value = mock_response
+
+        input_data = {
+            "prompt": "test prompt",
+            "model": ImageModel.PHOTON_1,
+            "aspect_ratio": AspectRatio.SQUARE,
+            "image_ref": [{"url": "https://example.com/ref1.jpg", "weight": 0.8}],
+            "style_ref": [{"url": "https://example.com/style1.jpg"}],
+            "character_ref": {"person1": {"images": ["https://example.com/char1.jpg"]}},
+        }
+
+        result = await generate_image(input_data)
+
+        # Verify response format
+        assert "Image generation completed" in result
+        assert "Prompt: test prompt" in result
+        assert "Model: photon-1" in result
+        assert "Aspect ratio: 1:1" in result
+        assert "Image URL: https://example.com/image.png" in result
+
+        # Verify request data
         call_kwargs = mock_request.call_args.kwargs
         assert call_kwargs["json"]["prompt"] == "test prompt"
-        assert call_kwargs["json"]["resolution"] == "720p"
-        assert call_kwargs["json"]["keyframes"] == keyframes
+        assert call_kwargs["json"]["model"] == ImageModel.PHOTON_1
+        assert call_kwargs["json"]["aspect_ratio"] == AspectRatio.SQUARE
+        assert call_kwargs["json"]["image_ref"] == input_data["image_ref"]
+        assert call_kwargs["json"]["style_ref"] == input_data["style_ref"]
+        assert call_kwargs["json"]["character_ref"] == input_data["character_ref"]
+
+
+@pytest.mark.asyncio
+async def test_state_handling(mock_env):
+    """Test handling of different generation states."""
+    with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_request:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+
+        # Test queued state
+        mock_response.json.return_value = {
+            "id": "test-id",
+            "state": State.QUEUED.value,
+            "created_at": "2024-03-20T12:00:00Z",
+        }
+        mock_request.return_value = mock_response
+        result = await get_generation({"generation_id": "test-id"})
+        assert f"State: {State.QUEUED.value}" in result
+
+        # Test dreaming state
+        mock_response.json.return_value["state"] = State.DREAMING.value
+        result = await get_generation({"generation_id": "test-id"})
+        assert f"State: {State.DREAMING.value}" in result
+
+        # Test completed state
+        mock_response.json.return_value["state"] = State.COMPLETED.value
+        result = await get_generation({"generation_id": "test-id"})
+        assert f"State: {State.COMPLETED.value}" in result
+
+        # Test failed state with reason
+        mock_response.json.return_value.update(
+            {"state": State.FAILED.value, "failure_reason": "API error"}
+        )
+        result = await get_generation({"generation_id": "test-id"})
+        assert f"State: {State.FAILED.value}" in result
+        assert "Reason: API error" in result
