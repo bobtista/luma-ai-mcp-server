@@ -9,7 +9,7 @@ RUN pip install uv
 COPY . .
 
 # Install dependencies using uv
-RUN uv venv
+RUN uv venv .venv
 RUN . .venv/bin/activate && uv pip install -e .
 
 # Run the server
