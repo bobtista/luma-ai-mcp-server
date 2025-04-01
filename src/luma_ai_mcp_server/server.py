@@ -1,8 +1,7 @@
-import asyncio
 import logging
 import os
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 import httpx
 from dotenv import load_dotenv

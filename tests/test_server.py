@@ -1,9 +1,7 @@
-from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from mcp.server import Server
-from mcp.types import TextContent, Tool
+from mcp.types import TextContent
 
 from luma_ai_mcp_server.server import (
     AddAudioInput,
@@ -296,6 +294,42 @@ async def test_get_credits(mock_env):
 
 def test_tool_schemas():
     """Test that all tool schemas are properly defined."""
+    # Test PingInput
+    schema = PingInput.model_json_schema()
+    assert schema["type"] == "object"
+
+    # Test GetGenerationInput
+    schema = GetGenerationInput.model_json_schema()
+    assert "generation_id" in schema["properties"]
+    assert schema["required"] == ["generation_id"]
+
+    # Test ListGenerationsInput
+    schema = ListGenerationsInput.model_json_schema()
+    assert "limit" in schema["properties"]
+    assert "offset" in schema["properties"]
+    assert schema["properties"]["limit"]["default"] == 10
+    assert schema["properties"]["offset"]["default"] == 0
+
+    # Test UpscaleGenerationInput
+    schema = UpscaleGenerationInput.model_json_schema()
+    assert "generation_id" in schema["properties"]
+    assert "resolution" in schema["properties"]
+    assert schema["required"] == ["generation_id", "resolution"]
+
+    # Test GetCreditsInput
+    schema = GetCreditsInput.model_json_schema()
+    assert schema["type"] == "object"
+
+    # Test Resolution enum
+    assert Resolution.P540.value == "540p"
+    assert Resolution.P720.value == "720p"
+    assert Resolution.P1080.value == "1080p"
+    assert Resolution.P4K.value == "4k"
+
+    # Test Duration enum
+    assert Duration.SHORT.value == "5s"
+    assert Duration.LONG.value == "9s"
+
     # Test CreateGenerationInput
     schema = CreateGenerationInput.model_json_schema()
     assert "prompt" in schema["properties"]
@@ -303,6 +337,13 @@ def test_tool_schemas():
     assert "aspect_ratio" in schema["properties"]
     assert "resolution" in schema["properties"]
     assert "duration" in schema["properties"]
+
+    # Test AddAudioInput
+    schema = AddAudioInput.model_json_schema()
+    assert "generation_id" in schema["properties"]
+    assert "prompt" in schema["properties"]
+    assert "negative_prompt" in schema["properties"]
+    assert "callback_url" in schema["properties"]
 
     # Test GenerateImageInput
     schema = GenerateImageInput.model_json_schema()
