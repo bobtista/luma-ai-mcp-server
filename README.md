@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/bobtista-luma-ai-mcp-server-badge.png)](https://mseep.ai/app/bobtista-luma-ai-mcp-server)
+
 # Luma AI MCP Server 🎥
 
 A Model Context Protocol server for Luma AI's Dream Machine API.
